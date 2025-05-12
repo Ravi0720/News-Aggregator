@@ -6,7 +6,10 @@
     <title>News Aggregator</title>
     <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@react-oauth/google@latest/dist/index.umd.js"></script>
+    <!-- Use a specific version of @react-oauth/google for reliability -->
+    <script src="https://cdn.jsdelivr.net/npm/@react-oauth/google@0.12.1/dist/index.umd.js"></script>
+    <!-- Add jwt-decode to decode Google ID tokens -->
+    <script src="https://cdn.jsdelivr.net/npm/jwt-decode@3.1.2/build/jwt-decode.min.js"></script>
     <link
       href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&family=Poppins:wght@300;400;600&display=swap"
       rel="stylesheet"
@@ -178,8 +181,10 @@
         padding-bottom: 5rem;
       }
       .md\:p-12 {
+        padding: 3rem;
       }
       .md\:p-16 {
+        padding: 4rem;
       }
       @media (min-width: 768px) {
         .md\:p-12 {
@@ -308,6 +313,8 @@
         line-height: 2.5rem;
       }
       .md\:text-2xl {
+        font-size: 1.5rem;
+        line-height: 2rem;
       }
       @media (min-width: 768px) {
         .md\:text-2xl {
@@ -360,10 +367,13 @@
         grid-template-columns: repeat(1, minmax(0, 1fr));
       }
       .sm\:grid-cols-2 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
       }
       .md\:grid-cols-3 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
       .sm\:grid-cols-3 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
       @media (min-width: 640px) {
         .sm\:grid-cols-2 {
@@ -565,7 +575,32 @@
     <script>
       const { createElement: h, useState, useEffect } = React;
       const { createRoot } = ReactDOM;
-      const { GoogleOAuthProvider, GoogleLogin } = window.reactOAuth;
+
+      // Function to wait for the Google OAuth script to load
+      const waitForGoogleOAuth = () => {
+        return new Promise((resolve) => {
+          const checkGoogle = () => {
+            if (
+              window.google &&
+              window.google.GoogleOAuthProvider &&
+              window.google.GoogleLogin
+            ) {
+              console.log(
+                "Google OAuth library loaded successfully:",
+                window.google
+              );
+              resolve({
+                GoogleOAuthProvider: window.google.GoogleOAuthProvider,
+                GoogleLogin: window.google.GoogleLogin,
+              });
+            } else {
+              console.log("Waiting for Google OAuth library...");
+              setTimeout(checkGoogle, 100);
+            }
+          };
+          checkGoogle();
+        });
+      };
 
       // Utility Functions for Authentication
       const validateEmail = (email) => {
@@ -680,6 +715,19 @@
         const [password, setPassword] = useState("");
         const [error, setError] = useState("");
         const [success, setSuccess] = useState("");
+        const [googleComponents, setGoogleComponents] = useState(null);
+
+        // Load Google OAuth components
+        useEffect(() => {
+          waitForGoogleOAuth()
+            .then((components) => {
+              setGoogleComponents(components);
+            })
+            .catch((err) => {
+              console.error("Failed to load Google OAuth components:", err);
+              setError("Google login is unavailable at the moment.");
+            });
+        }, []);
 
         const handleSubmit = (e) => {
           e.preventDefault();
@@ -725,10 +773,20 @@
 
         const handleGoogleSuccess = (credentialResponse) => {
           const token = credentialResponse.credential;
-          const user = {
-            email: `googleuser_${Date.now()}@example.com`,
-            name: "Google User",
-          };
+          let user;
+          try {
+            const decoded = window.jwtDecode(token);
+            user = {
+              email: decoded.email || `googleuser_${Date.now()}@example.com`,
+              name: decoded.name || "Google User",
+            };
+          } catch (err) {
+            console.error("Failed to decode Google ID token:", err);
+            user = {
+              email: `googleuser_${Date.now()}@example.com`,
+              name: "Google User",
+            };
+          }
           setUser(user);
           saveUserToLocalStorage(user);
           setSuccess("Google login successful!");
@@ -847,46 +905,56 @@
                 )
               )
             ),
-            h(
-              "div",
-              { className: "text-center mt-4" },
-              h("p", { className: "text-gray-400 mb-2" }, "Or login with"),
-              h(GoogleLogin, {
-                onSuccess: handleGoogleSuccess,
-                onError: handleGoogleError,
-                render: ({ onClick }) =>
+            googleComponents
+              ? h(
+                  "div",
+                  { className: "text-center mt-4" },
+                  h("p", { className: "text-gray-400 mb-2" }, "Or login with"),
+                  h(googleComponents.GoogleLogin, {
+                    onSuccess: handleGoogleSuccess,
+                    onError: handleGoogleError,
+                    render: ({ onClick }) =>
+                      h(
+                        "button",
+                        {
+                          onClick: onClick,
+                          className:
+                            "w-full py-3 bg-gray-700 text-white font-semibold rounded-md hover:bg-gray-600 transition-all duration-300 flex items-center justify-center",
+                          "aria-label": "Login with Google",
+                        },
+                        h(
+                          "svg",
+                          { className: "w-5 h-5 mr-2", viewBox: "0 0 24 24" },
+                          h("path", {
+                            fill: "#4285F4",
+                            d: "M22.56 12.25c0-.78-.07-1.53-.20-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z",
+                          }),
+                          h("path", {
+                            fill: "#34A853",
+                            d: "M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-1.04.69-2.36 1.09-3.71 1.09-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C4.01 20.48 7.72 23 12 23z",
+                          }),
+                          h("path", {
+                            fill: "#FBBC05",
+                            d: "M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z",
+                          }),
+                          h("path", {
+                            fill: "#EA4335",
+                            d: "M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.72 1 4.01 3.52 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z",
+                          })
+                        ),
+                        "Login with Google"
+                      ),
+                  })
+                )
+              : h(
+                  "div",
+                  { className: "text-center mt-4" },
                   h(
-                    "button",
-                    {
-                      onClick: onClick,
-                      className:
-                        "w-full py-3 bg-gray-700 text-white font-semibold rounded-md hover:bg-gray-600 transition-all duration-300 flex items-center justify-center",
-                      "aria-label": "Login with Google",
-                    },
-                    h(
-                      "svg",
-                      { className: "w-5 h-5 mr-2", viewBox: "0 0 24 24" },
-                      h("path", {
-                        fill: "#4285F4",
-                        d: "M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z",
-                      }),
-                      h("path", {
-                        fill: "#34A853",
-                        d: "M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-1.04.69-2.36 1.09-3.71 1.09-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C4.01 20.48 7.72 23 12 23z",
-                      }),
-                      h("path", {
-                        fill: "#FBBC05",
-                        d: "M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z",
-                      }),
-                      h("path", {
-                        fill: "#EA4335",
-                        d: "M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.72 1 4.01 3.52 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z",
-                      })
-                    ),
-                    "Login with Google"
-                  ),
-              })
-            )
+                    "p",
+                    { className: "text-red-400" },
+                    "Google Login is unavailable at the moment."
+                  )
+                )
           )
         );
       };
@@ -1053,6 +1121,20 @@
         const [page, setPage] = useState("auth");
         const [user, setUser] = useState(getUserFromLocalStorage());
         const [isTransitioning, setIsTransitioning] = useState(false);
+        const [googleComponents, setGoogleComponents] = useState(null);
+
+        useEffect(() => {
+          waitForGoogleOAuth()
+            .then((components) => {
+              setGoogleComponents(components);
+            })
+            .catch((err) => {
+              console.error(
+                "Failed to load Google OAuth components in App:",
+                err
+              );
+            });
+        }, []);
 
         const handlePageChange = (newPage) => {
           if (!user && newPage !== "auth" && newPage !== "forgot-password") {
@@ -1072,39 +1154,66 @@
           setPage("auth");
         };
 
-        return h(
-          GoogleOAuthProvider,
-          {
-            clientId:
-              "1040566492472-1m2v4nle6ke6mfq5si1aiho92577gvmr.apps.googleusercontent.com1040566492472-1m2v4nle6ke6mfq5si1aiho92577gvmr.apps.googleusercontent.com1040566492472-1m2v4nle6ke6mfq5si1aiho92577gvmr.apps.googleusercontent.com1040566492472-1m2v4nle6ke6mfq5si1aiho92577gvmr.apps.googleusercontent.com1040566492472-1m2v4nle6ke6mfq5si1aiho92577gvmr.apps.googleusercontent.com1040566492472-1m2v4nle6ke6mfq5si1aiho92577gvmr.apps.googleusercontent.com1040566492472-1m2v4nle6ke6mfq5si1aiho92577gvmr.apps.googleusercontent.com1040566492472-1m2v4nle6ke6mfq5si1aiho92577gvmr.apps.googleusercontent.com1040566492472-1m2v4nle6ke6mfq5si1aiho92577gvmr.apps.googleusercontent.com1040566492472-1m2v4nle6ke6mfq5si1aiho92577gvmr.apps.googleusercontent.com",
-          },
-          h(
-            "div",
-            {
-              className:
-                "bg-gradient-to-br from-gray-900 via-gray-800 to-black min-h-screen font-poppins antialiased relative overflow-hidden",
-            },
-            h(Navbar, { setPage: handlePageChange, user, handleLogout }),
-            h(
+        return googleComponents
+          ? h(
+              googleComponents.GoogleOAuthProvider,
+              {
+                clientId:
+                  "35324214464-c4mc85njj4lk2rvb81r4sp1c301cchmu.apps.googleusercontent.com",
+              },
+              h(
+                "div",
+                {
+                  className:
+                    "bg-gradient-to-br from-gray-900 via-gray-800 to-black min-h-screen font-poppins antialiased relative overflow-hidden",
+                },
+                h(Navbar, { setPage: handlePageChange, user, handleLogout }),
+                h(
+                  "div",
+                  {
+                    className: `transition-opacity duration-500 ${
+                      isTransitioning ? "opacity-0" : "opacity-100"
+                    }`,
+                  },
+                  page === "auth"
+                    ? h(Auth, { setPage: handlePageChange, setUser })
+                    : page === "forgot-password"
+                    ? h(ForgotPassword, { setPage: handlePageChange })
+                    : page === "home"
+                    ? h(NewsFeed)
+                    : page === "categories"
+                    ? h(Categories)
+                    : h(About, { setPage: handlePageChange })
+                ),
+                h(Footer, { setPage: handlePageChange })
+              )
+            )
+          : h(
               "div",
               {
-                className: `transition-opacity duration-500 ${
-                  isTransitioning ? "opacity-0" : "opacity-100"
-                }`,
+                className:
+                  "bg-gradient-to-br from-gray-900 via-gray-800 to-black min-h-screen font-poppins antialiased relative overflow-hidden",
               },
-              page === "auth"
-                ? h(Auth, { setPage: handlePageChange, setUser })
-                : page === "forgot-password"
-                ? h(ForgotPassword, { setPage: handlePageChange })
-                : page === "home"
-                ? h(NewsFeed)
-                : page === "categories"
-                ? h(Categories)
-                : h(About, { setPage: handlePageChange })
-            ),
-            h(Footer, { setPage: handlePageChange })
-          )
-        );
+              h(Navbar, { setPage: handlePageChange, user, handleLogout }),
+              h(
+                "div",
+                {
+                  className: `transition-opacity duration-500 ${
+                    isTransitioning ? "opacity-0" : "opacity-100"
+                  }`,
+                },
+                page === "auth"
+                  ? h(Auth, { setPage: handlePageChange, setUser })
+                  : page === "forgot-password"
+                  ? h(ForgotPassword, { setPage: handlePageChange })
+                  : page === "home"
+                  ? h(NewsFeed)
+                  : page === "categories"
+                  ? h(Categories)
+                  : h(About, { setPage: handlePageChange })
+              ),
+              h(Footer, { setPage: handlePageChange })
+            );
       };
 
       // Navbar Component
@@ -1582,7 +1691,7 @@
 
         const fetchNewsAPIByCategory = async (category) => {
           try {
-            const apiKey = "your-newsapi-key";
+            const apiKey = "1f48fc23-999a-4e75-b829-262d9a223d73";
             const url = `https://newsapi.org/v2/top-headlines?category=${category}&country=us&pageSize=${pageSize}&apiKey=${apiKey}`;
             const response = await fetch(url);
             const data = await response.json();
@@ -1600,7 +1709,7 @@
 
         const fetchGNewsByCategory = async (category) => {
           try {
-            const apiKey = "your-gnews-api-key";
+            const apiKey = "ff2b6d9a4c67cec40fcb2921b361e54e";
             const url = `https://gnews.io/api/v4/top-headlines?category=${category}&lang=en&max=${pageSize}&apikey=${apiKey}`;
             const response = await fetch(url);
             const data = await response.json();
@@ -1626,7 +1735,7 @@
 
         const fetchMediastackByCategory = async (category) => {
           try {
-            const apiKey = "your-mediastack-api-key";
+            const apiKey = "132b2b3c0e1f9588dd7a0731be72b9c3";
             const url = `http://api.mediastack.com/v1/news?access_key=${apiKey}&categories=${category}&languages=en&limit=${pageSize}`;
             const response = await fetch(url);
             const data = await response.json();
@@ -1961,11 +2070,11 @@
             h(
               "a",
               {
-                href: "mailto:contact@newsaggregator.com",
+                href: "mailto:rs2583192@gmail.com",
                 className: "text-cyan-400 hover:underline",
                 "aria-label": "Email News Aggregator",
               },
-              "contact@newsaggregator.com"
+              "rs2583192@gmail.com"
             )
           ),
           h(
@@ -2027,7 +2136,7 @@
             h(
               "a",
               {
-                href: "https://x.com/newsaggregator",
+                href: "https://x.com/RaviShanka83714",
                 className:
                   "text-gray-400 hover:text-cyan-400 transition-colors duration-300",
                 "aria-label": "Follow on Twitter",
@@ -2037,7 +2146,7 @@
             h(
               "a",
               {
-                href: "https://github.com/newsaggregator",
+                href: "https://github.com/Ravi0720",
                 className:
                   "text-gray-400 hover:text-cyan-400 transition-colors duration-300",
                 "aria-label": "Follow on GitHub",
